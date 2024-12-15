@@ -1,4 +1,14 @@
-// SPDX-License-Identifier: MIT
+/*
+SPDX-License-Identifier: MIT
+
+This is the escrow smart contract for Tratok employee compensation of tokens.
+This immutable contract allows the public to see the team's commitment to honoring their no-sell clauses as well as full public transparency on all compensation.
+
+@version "1.0"
+@developer "Tratok Team"
+@date "15 December 2024"
+@thoughts "Bringing more accountability and transparency to the industry and setting an example of the right way to do things!" 
+*/
 pragma solidity ^0.8.0;
 
 interface IERC20 {
@@ -23,6 +33,8 @@ contract TratokEmployeeEscrow {
         token = IERC20(0x35bC519E9fe5F04053079e8a0BF2a876D95D2B33);
     }
 
+
+    // Method to create each invidual escrow
     function deposit(address _deliveryAddress, uint256 _days, uint256 _amount) external {
 	
 		// Ensure the amount is greater than zero
@@ -43,6 +55,7 @@ contract TratokEmployeeEscrow {
         escrowCount++;
     }
 
+    // Method to release the escrow. It can only be called when the relevant time has elapsed
     function release(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
 		
@@ -62,10 +75,12 @@ contract TratokEmployeeEscrow {
         escrow.released = true; 
     }
 
+    // Method to show the overall TRAT balance of the contract
     function getBalance() external view returns (uint256) {
         return token.balanceOf(address(this));
     }
 
+    // Method to show escrow details for each individual escrow
     function getEscrowDetails(uint256 escrowId) external view returns (address, uint256, uint256, bool) {
         Escrow storage escrow = escrows[escrowId];
         return (escrow.deliveryAddress, escrow.releaseTime, escrow.amount, escrow.released);
