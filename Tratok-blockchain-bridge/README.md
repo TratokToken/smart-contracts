@@ -1,9 +1,9 @@
 The following Blockchain Migration bridges are currently under developlemt
 
-# Ethereum to BSC
-This bridge uses locking and minting for migration of Tratok from the Ethereum blockchain to the BSC blockchain.
+# Ethereum to BNB
+This bridge uses locking and minting for migration of Tratok from the Ethereum blockchain to the BNB blockchain.
 
-For migration from the BSC blockchain to the Ethereum blockchain it uses burning and unlocking.
+For migration from the BNB blockchain to the Ethereum blockchain it uses burning and unlocking.
 
 The bridge is managed by a dedicated oracle maintained by Tratok.
 
