@@ -2,7 +2,7 @@
 The Tratok Token (TRAT) smart contracts. In compliance with Tratok Holding Limited's policy on maximum transparency, copies of the verified smart 
 contracts found on etherscan are included here.
 
-# Escrow smart-contracts
+# escrow-smart-contracts
 The open source code of the smart contracts reprsenting the escrows for promotion programs and staff compensation are shared for
 the public to scrutinize at their desire.
 
