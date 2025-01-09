@@ -4,17 +4,25 @@ pragma solidity ^0.8.0;
 /* 
 * Explanation:
 *
-* This is the smart contract used as a bridge for migrating Tratok (TRAT) from the BNB
-* blockchain to the Ethereum blockchain and vice versa.
+* This is the smart contract used as a bridge for migrating Tratok (TRAT) from the Ethereum
+* blockchain to the BNB blockchain and vice versa.
 * 
 * Methodology:
 *
-* The contract features a minting functionality to mint TRAT for a user on the BNB whenever they
-* migrate Tratok (TRAT) tokens from the Ethereum blockchain. The contract also features a 
-* burn function for when users wish to migrate their tokens from the BNB blockchain to the Ethereum 
-* blockchain. All events are monitored by Tratok's off-chain oracle to ensure circulations supply
-* remains unchanged.
+* The contract is initialized with the address of the Tratok token (TRAT), allowing it to interact
+* with the existing token.
+* It features a locking functionality so users can lock their TRAT tokens by calling the lockTokens
+* function, which transfers the specified amount of tokens from the user's address to the contract.
+* The contract then emits a TokensLocked event whenever tokens are locked, which is monitored by
+* Tratok's off-chain oracle to trigger the minting of BEP20 tokens on BNB at the desired address of
+* of the user.
 *
+* Fail safe:
+*
+* The admin (the address that deployed the contract) can withdraw any locked tokens if necessary.
+* In case of a malfunction or unexpected issue with the contract, the admin can withdraw tokens to 
+* prevent loss or misuse. This feature acts as a safety net, allowing the admin to respond quickly to
+* emergencies.
 *
 * Risks: 
 * 
@@ -23,19 +31,19 @@ pragma solidity ^0.8.0;
 * wrong address or interacting with a fraudulent contract. This can be mitigated by using the official
 * bridge portal. https://bridge.tratok.com
 * 
-* The contract grants significant powers to the admin, including the ability to mint new tokens and withdraw
-* BNB fees. If the admin's private key is compromised, an attacker could gain control over the contract, 
+* The contract grants significant powers to the admin, including the ability to unlock tokens and withdraw
+* ETH fees. If the admin's private key is compromised, an attacker could gain control over the contract, 
 * potentially draining funds or manipulating token unlocks. This can be mitigated through best security
 * practices including making the admin wallet a Multi-Signature Wallet which requires multiple private 
-* keys to authorize critical actions, such as unlocking tokens or withdrawing BNB fees. By distributing 
+* keys to authorize critical actions, such as unlocking tokens or withdrawing ETH fees. By distributing 
 * control among several trusted parties, the risk of a single compromised key leading to fund loss is 
 * significantly reduced.
 *
 * Sustainability:
 * 
 * To ensure sustainability of the bridge the admin wallet collects a fee every time a migration from
-* the BSC blockchain to Ethereum blockchain is performed. This fee can be changed to reflect network
-* congestion via the setBNBFee method.
+* the Ethereum blockchain to BNB blockchain is performed. This fee can be changed to reflect network
+* congestion via the setEthFee method.
 * 
 * @version "1.1"
 * @developer "Tratok Team"
@@ -43,161 +51,111 @@ pragma solidity ^0.8.0;
 * @thoughts "The Worlds Travel Token Needs To Be On Every Global Blockchain!" 
 */
 
-
+import "./IERC20.sol";
 import "./MultiSigWallet.sol";
 
-contract TratokBNB {
-    string public name;
-    string public symbol;
-    uint8 public decimals;
-    uint256 public totalSupply;
-
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-
-    address public owner;
-
-    // Multi-signature wallet is used to enhance security
+contract TratokBNBBridge {
+    IERC20 public token;
     MultiSigWallet public multiSigWallet;
+    uint256 public ethFee;
+	uint256 public tokensLocked;
 
-    // Maximum supply (in wei) set at 100,000,000,000 with 18 decimals
-    uint256 public constant MAX_SUPPLY = 100_000_000_000 * 10**18;
-
-    // 5 decimal places set to be consistent
-    uint8 public constant DECIMALS = 5;
-
-    // Event declaration for burning tokens
-    event TokensBurned(address indexed user, uint256 amount);
-
-    // Fee for burning tokens in BNB
-    uint256 public burnFee;
-
-    // Total collected fees in BNB
-    uint256 public totalFeesCollected;
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
-    event Mint(address indexed to, uint256 value);
-    event Burn(address indexed from, uint256 value);
-    event BurnFeeUpdated(uint256 newFee);
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not the contract owner");
-        _;
-    }
+    event TokensLocked(address indexed user, uint256 amount);
+    event TokensUnlocked(address indexed user, uint256 amount);
+    event FeeUpdated(uint256 newFee);
+    event AdminWithdrawn(uint256 amount);
 
     constructor(address[] memory owners, uint256 requiredSignatures) {
-        name = "Tratok";
-        symbol = "TRAT";
-        decimals = DECIMALS;
-        totalSupply = 0; // Initialize total supply to zero
-        owner = msg.sender; // Set the contract deployer as the owner
-
-        // Initialize the multi-signature wallet
+        // Set the address as the Tratok Token: "0x35bC519E9fe5F04053079e8a0BF2a876D95D2B33"
+        token = IERC20(0x99d7a7F4C5551955c4bA5bA3C8965fFD9C869B4c);
+        
+        // Create a new MultiSigWallet within the constructor
         multiSigWallet = new MultiSigWallet(owners, requiredSignatures);
-        burnFee = 0; // Initialize burn fee to zero
     }
 
-    function transfer(address _to, uint256 _value) public returns (bool success) {
-        require(_to != address(0), "Invalid address");
-        require(balanceOf[msg.sender] >= _value, "Insufficient balance");
+    /*
+    * Function to lock TRAT tokens in the contract.  This method is called when someone wishes to migrate Tratok (TRAT) 
+    * from the Ethereum blockchain to the BNB blockchain. Locking the tokens and removing them from supply before minting
+    * an equal amount of tokens on the BNB blockchain ensures the circulating supply remains unchanged.
+    */
+    
+    function lockTokens(uint256 amount) external payable {
+        // Ensure the amount is positive
+        require(amount > 0, "TRAT amount must be greater than zero");
 
-        balanceOf[msg.sender] -= _value;
-        balanceOf[_to] += _value;
-        emit Transfer(msg.sender, _to, _value);
-        return true;
+        // Check if the user has sent enough ETH to cover the fee
+        require(msg.value >= ethFee, "Insufficient ETH sent to cover the migration fee");
+
+        // Transfer TRAT tokens from the user to the contract
+        require(token.transferFrom(msg.sender, address(this), amount), "Failed to transfer TRAT from user to contract");
+        tokensLocked += amount;
+
+        // Emit an event indicating tokens have been locked 
+        emit TokensLocked(msg.sender, amount); 
+
+        // If the user sent more than the fee, refund the excess
+        if (msg.value > ethFee) {
+            (bool success, ) = payable(msg.sender).call{value: msg.value - ethFee}("");
+            require(success, "Failed to refund excess ETH to user");
+        }
     }
 
-    function approve(address _spender, uint256 _value) public returns (bool success) {
-        allowance[msg.sender][_spender] = _value;
-        emit Approval(msg.sender, _spender, _value);
-        return true;
+    /*
+    * Function to unlock TRAT tokens and release them from the contract. This method is called when
+    * someone wishes to migrate Tratok (TRAT) from the BNB blockchain to the Ethereum blockchain. 
+    * The TRAT on BNB is burned beforehand in order to ensure that the circulating supply remains
+    * the same.
+    */
+    function unlockTokens(address user, uint256 amount) external {
+        require(msg.sender == address(multiSigWallet), "Only the admin (MultiSigWallet) can unlock tokens");
+        require(tokensLocked >= amount, "Not enough locked tokens in contract to unlock");
+        
+        // Transfer tokens to the user
+        require(token.transfer(user, amount), "Failed to transfer unlocked TRAT to user");
+        tokensLocked -= amount;
+        
+        emit TokensUnlocked(user, amount);
     }
 
-    function transferFrom(address _from, address _to, uint256 _value) public returns (bool success) {
-        require(_from != address(0), "Invalid address");
-        require(_to != address(0), "Invalid address");
-        require(balanceOf[_from] >= _value, "Insufficient balance");
-        require(allowance[_from][msg.sender] >= _value, "Allowance exceeded");
-
-        balanceOf[_from] -= _value;
-        balanceOf[_to] += _value;
-        allowance[_from][msg.sender] -= _value;
-        emit Transfer(_from, _to, _value);
-        return true;
+    /*
+    * This function allows the admin to withdraw any locked TRAT tokens from the contract.
+    * It checks that the caller is the admin and transfers the specified amount of tokens 
+    * to the admin's address. This is an important function to ensure tokens are not lost from circulation
+    * in the event of bridge failure or accidental calling of lockTokens function by the public.
+    */
+    function withdrawTokens(uint256 amount) external {
+        // Ensure only admin can withdraw locked tokens
+        require(msg.sender == address(multiSigWallet), "Only the admin (MultiSigWallet) can withdraw tokens");
+        
+        // Transfer tokens to admin
+        require(token.transfer(address(multiSigWallet), amount), "Failed to transfer tokens to admin");
+        emit AdminWithdrawn(amount);
     }
 
-    /**
-     * @dev Mints new tokens to the specified address.
-     * @param to The address to receive the newly minted tokens.
-     * @param amount The amount of tokens to mint.
-     */
-    function mint(address to, uint256 amount) public {
-        require(msg.sender == address(multiSigWallet), "Only multi-signature wallet can mint tokens");
-        require(totalSupply + amount <= MAX_SUPPLY, "Minting exceeds max supply");
-
-        // Update the balance and total supply
-        balanceOf[to] += amount;
-        totalSupply += amount;
-
-        // Emit Transfer event for minting
-        emit Transfer(address(0), to, amount);
-        emit Mint(to, amount);
+    // Function for the admin to withdraw any ETH collected as fees
+    function withdrawETH() external {
+        require(msg.sender == address(multiSigWallet), "Only the admin (MultiSigWallet) can withdraw ETH");
+        uint256 balance = address(this).balance;
+        require(payable(multiSigWallet).send(balance), "Failed to send ETH to MultiSigWallet");
     }
 
-    /**
-     * @dev Allows users to burn their own tokens so they can be migrated to Ethereum blockchain.
-     * @param amount The amount of tokens to burn (in wei).
-     */
-    function burn(uint256 amount) public payable {
-        require(amount > 0, "Amount must be greater than 0");
-        require(msg.value >= burnFee, "Insufficient BNB sent for burn fee");
-        require(amount <= balanceOf[msg.sender], "Insufficient TRAT balance to burn");
-
-        // Update the balance and total supply
-        balanceOf[msg.sender] -= amount;
-        totalSupply -= amount;
-
-        // Emit Transfer event for burning
-        emit Transfer(msg.sender, address(0), amount);
-        emit Burn(msg.sender, amount);
-
-        // Collect the burn fee
-        totalFeesCollected += msg.value;
-
-        // Emit event on burn
-        emit TokensBurned(msg.sender, amount);
+    // Function to set a new ETH fee (only callable by admin)
+    function setEthFee(uint256 newFee) external {
+        require(msg.sender == address(multiSigWallet), "Only admin can set fee");
+        ethFee = newFee; 
+        emit FeeUpdated(newFee);
     }
 
-    /**
-     * @dev Set the burn fee in BNB.
-     * @param newFee The new burn fee (in wei).
-     */
-    function setBurnFee(uint256 newFee) public {
-        require(msg.sender == address(multiSigWallet), "Only multi-signature wallet can set burn fee");
-        burnFee = newFee;
-        emit BurnFeeUpdated(newFee); // Added event for updating burn fee
+    // Function to get the current ETH fee
+    function getEthFee() external view returns (uint256) {
+        return ethFee;
     }
 
-    /**
-     * @dev Withdraw collected fees to the multi-signature wallet.
-     */
-    function withdrawFees() public {
-        require(msg.sender == address(multiSigWallet), "Only multi-signature wallet can withdraw fees");
-        uint256 amount = totalFeesCollected;
-        totalFeesCollected = 0; // Reset the fee counter after transfer
-        (bool success, ) = address(multiSigWallet).call{value: amount}("");
-        require(success, "Transfer failed");
+    // Function to check the contract's ETH balance
+    function checkETHBalance() external view returns (uint256) {
+        return address(this).balance;
     }
 
-    /**
-     * @dev Check the total fees collected in BNB.
-     * @return The total fees collected in BNB.
-     */
-    function checkTotalFeesCollected() public view returns (uint256) {
-        return totalFeesCollected;
-    }
-
-    // Fallback function to receive BNB
+    // Allow contract to receive ETH
     receive() external payable {}
 }
