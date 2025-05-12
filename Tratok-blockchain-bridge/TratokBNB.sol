@@ -25,21 +25,22 @@ pragma solidity ^0.8.0;
 * 
 * The contract grants significant powers to the admin, including the ability to mint new tokens and withdraw
 * BNB fees. If the admin's private key is compromised, an attacker could gain control over the contract, 
-* potentially draining funds or manipulating token unlocks. This can be mitigated through best security
+* potentially draining funds or manipulating token unlocks. This is mitigated through best security
 * practices including making the admin wallet a Multi-Signature Wallet which requires multiple private 
 * keys to authorize critical actions, such as unlocking tokens or withdrawing BNB fees. By distributing 
 * control among several trusted parties, the risk of a single compromised key leading to fund loss is 
-* significantly reduced.
+* significantly reduced. In the unlikely event that a key is compromised, its permissions may be revoked by the other
+* owners.
 *
 * Sustainability:
 * 
-* To ensure sustainability of the bridge the admin wallet collects a fee every time a migration from
+* To ensure sustainability of the bridge and prevent abuse, the contract collects a fee every time a migration from
 * the BSC blockchain to Ethereum blockchain is performed. This fee can be changed to reflect network
 * congestion via the setBNBFee method.
 * 
-* @version "1.1"
+* @version "1.2"
 * @developer "Tratok Team"
-* @date "21 December 2024"
+* @date "12 May 2025"
 * @thoughts "The Worlds Travel Token Needs To Be On Every Global Blockchain!" 
 */
 
