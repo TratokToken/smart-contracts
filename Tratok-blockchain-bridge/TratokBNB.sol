@@ -81,6 +81,7 @@ contract TratokBNB {
     event Mint(address indexed to, uint256 value);
     event Burn(address indexed from, uint256 value);
     event BurnFeeUpdated(uint256 newFee);
+    event FeesWithdrawn(address indexed destination, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not the contract owner");
@@ -181,15 +182,24 @@ contract TratokBNB {
     }
 
     /**
-     * @dev Withdraw collected fees to the multi-signature wallet.
+     * @dev Withdraw collected BNB fees to a specified destination address.
+     * @param destination The address to receive the withdrawn fees.
      */
-    function withdrawFees() public {
+    function withdrawFees(address destination) public {
         require(msg.sender == address(multiSigWallet), "Only multi-signature wallet can withdraw fees");
+        require(destination != address(0), "Invalid destination address");
+        require(destination != address(this), "Cannot send to self");
+
         uint256 amount = totalFeesCollected;
-        totalFeesCollected = 0; // Reset the fee counter after transfer
-        (bool success, ) = address(multiSigWallet).call{value: amount}("");
+        require(amount > 0, "No fees to withdraw");
+
+        totalFeesCollected = 0; // Reset the fee counter
+        (bool success, ) = destination.call{value: amount}("");
         require(success, "Transfer failed");
+
+        emit FeesWithdrawn(destination, amount);
     }
+
 
     /**
      * @dev Check the total fees collected in BNB.
