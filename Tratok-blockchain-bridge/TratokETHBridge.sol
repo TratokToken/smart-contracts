@@ -64,6 +64,7 @@ contract TratokBNBBridge {
     event TokensUnlocked(address indexed user, uint256 amount);
     event FeeUpdated(uint256 newFee);
     event AdminWithdrawn(uint256 amount);
+    event ETHWithdrawn(address indexed recipient, uint256 amount);
 
     constructor(address[] memory owners, uint256 requiredSignatures) {
         // Set the address as the Tratok Token: "0x35bC519E9fe5F04053079e8a0BF2a876D95D2B33"
@@ -133,10 +134,14 @@ contract TratokBNBBridge {
     }
 
     // Function for the admin to withdraw any ETH collected as fees
-    function withdrawETH() external {
-        require(msg.sender == address(multiSigWallet), "Only the admin (MultiSigWallet) can withdraw ETH");
-        uint256 balance = address(this).balance;
-        require(payable(multiSigWallet).send(balance), "Failed to send ETH to MultiSigWallet");
+    function withdrawETH(address payable recipient) external {
+    	require(msg.sender == address(multiSigWallet), "Only the admin (MultiSigWallet) can withdraw ETH");
+    	require(recipient != address(0), "Invalid recipient address");
+    	uint256 balance = address(this).balance;
+    	require(balance > 0, "No ETH available to withdraw");
+    	(bool success, ) = recipient.call{value: balance}("");
+    	require(success, "Failed to send ETH to recipient");
+    	emit ETHWithdrawn(recipient, balance);
     }
 
     // Function to set a new ETH fee (only callable by admin)
